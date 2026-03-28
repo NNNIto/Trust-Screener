@@ -42,14 +42,6 @@ except Exception as _e:
 
 _GPT_CACHE: dict = {}
 
-# ── チャート生成 ───────────────────────────
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import matplotlib.ticker as mticker
-from matplotlib.font_manager import FontProperties, fontManager
-
 # ── 翻訳 ──────────────────────────────────
 from deep_translator import GoogleTranslator
 
@@ -102,20 +94,6 @@ if _reg_normal:
 else:
     pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
 
-# matplotlib 日本語フォント
-_MPL_FP = None
-if _FONT_PATH:
-    try:
-        fontManager.addfont(_FONT_PATH)
-        _MPL_FP = FontProperties(fname=_FONT_PATH)
-        _mpl_name = _MPL_FP.get_name()
-        matplotlib.rcParams.update({
-            "font.family": "sans-serif",
-            "font.sans-serif": [_mpl_name, "DejaVu Sans"],
-            "axes.unicode_minus": False,
-        })
-    except Exception:
-        _MPL_FP = None
 
 # カラーパレット
 C_NAVY   = colors.HexColor("#1a3a5c")
@@ -1112,90 +1090,6 @@ def _tbl(data, col_widths, extra_styles=None, hdr_bg=C_NAVY, subhdr_rows=None):
     t.setStyle(TableStyle(base))
     return t
 
-# ─────────────────────────────────────────
-# チャート生成（NAV推移＋テクニカル）
-# ─────────────────────────────────────────
-def generate_fund_chart(ticker: str, df: pd.DataFrame, fm: dict,
-                        fund_name: str, market: str) -> "str | None":
-    """ファンドのNAV推移チャートをPNG保存してパスを返す"""
-    try:
-        # 直近2年分
-        df2 = df.iloc[-504:].copy() if len(df) >= 504 else df.copy()
-        if len(df2) < 20:
-            return None
-
-        fig, axes = plt.subplots(3, 1, figsize=(10, 8),
-                                 gridspec_kw={"height_ratios": [3, 1, 1]})
-        fig.patch.set_facecolor("#fafafa")
-        fp = _MPL_FP
-
-        def _label(text):
-            return dict(fontproperties=fp) if fp else {}
-
-        # ── 上段: NAV推移 ──
-        ax1 = axes[0]
-        ax1.set_facecolor("#f8f9fa")
-        close = df2["Close"]
-        ax1.plot(df2.index, close, color="#2563a8", linewidth=1.5, label="NAV/終値")
-
-        if "SMA50" in df2.columns:
-            ax1.plot(df2.index, df2["SMA50"],  color="#f57c00",
-                     linewidth=0.8, linestyle="--", label="SMA50")
-        if "SMA200" in df2.columns:
-            ax1.plot(df2.index, df2["SMA200"], color="#dc2626",
-                     linewidth=0.8, linestyle="--", label="SMA200")
-        if "BB_upper" in df2.columns and "BB_lower" in df2.columns:
-            ax1.fill_between(df2.index, df2["BB_upper"], df2["BB_lower"],
-                             alpha=0.08, color="#2563a8")
-
-        ax1.set_title(f"{fund_name} ({ticker})  NAV推移・テクニカル分析",
-                      fontsize=10, **({"fontproperties": fp} if fp else {}))
-        ax1.legend(loc="upper left", fontsize=7,
-                   prop=(fp if fp else matplotlib.font_manager.FontProperties()))
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y/%m"))
-        ax1.grid(True, alpha=0.3)
-
-        # リターン・コスト注記
-        ret_str = f"1年: {fm['ret1y']:.1f}%" if fm.get("ret1y") is not None else ""
-        exp_str = f" | 信託報酬: {fm['expense']*100:.3f}%" if fm.get("expense") else ""
-        ax1.text(0.01, 0.02, ret_str + exp_str,
-                 transform=ax1.transAxes, fontsize=7, color="#374151",
-                 **({"fontproperties": fp} if fp else {}))
-
-        # ── 中段: RSI ──
-        ax2 = axes[1]
-        ax2.set_facecolor("#f8f9fa")
-        if "RSI14" in df2.columns:
-            rsi_s = df2["RSI14"].dropna()
-            ax2.plot(rsi_s.index, rsi_s, color="#15803d", linewidth=1.0)
-            ax2.axhline(70, color="#dc2626", linewidth=0.6, linestyle="--")
-            ax2.axhline(50, color="#6b7280", linewidth=0.4, linestyle=":")
-            ax2.axhline(30, color="#2563a8", linewidth=0.6, linestyle="--")
-            ax2.set_ylim(0, 100)
-            ax2.set_ylabel("RSI(14)", fontsize=7, **_label(""))
-        ax2.grid(True, alpha=0.3)
-
-        # ── 下段: MACDヒストグラム ──
-        ax3 = axes[2]
-        ax3.set_facecolor("#f8f9fa")
-        if "MACD_hist" in df2.columns:
-            hist = df2["MACD_hist"].dropna()
-            colors_bar = ["#15803d" if v >= 0 else "#dc2626" for v in hist]
-            ax3.bar(hist.index, hist, color=colors_bar, width=1.5, alpha=0.7)
-            ax3.axhline(0, color="#374151", linewidth=0.5)
-            ax3.set_ylabel("MACD Hist", fontsize=7, **_label(""))
-        ax3.grid(True, alpha=0.3)
-        ax3.xaxis.set_major_formatter(mdates.DateFormatter("%Y/%m"))
-
-        plt.tight_layout(pad=1.0)
-        chart_path = os.path.join(OUTPUT_DIR, f"chart_{ticker.replace('.', '_')}.png")
-        fig.savefig(chart_path, dpi=120, bbox_inches="tight",
-                    facecolor=fig.get_facecolor())
-        plt.close(fig)
-        return chart_path
-    except Exception as e:
-        print(f"  [チャート生成エラー] {ticker}: {e}")
-        return None
 
 # ─────────────────────────────────────────
 # CSV保存
@@ -1423,8 +1317,6 @@ def generate_pdf(results: list, fund_data_raw: dict):
     elems.append(Spacer(1, 6*mm))
 
     # 個別ファンド詳細
-    from reportlab.platypus import Image as RLImage
-
     for rank, r in enumerate(candidates[:10], 1):
         ticker    = r["ティッカー"]
         fund_name = r.get("ファンド名") or ticker
@@ -1502,15 +1394,6 @@ def generate_pdf(results: list, fund_data_raw: dict):
                         fontName=_FONT_BOLD, fontSize=8.5, textColor=C_NAVY,
                         leading=13, spaceAfter=3)))
 
-        # チャート
-        if df_ind is not None:
-            chart_path = generate_fund_chart(ticker, df_ind, fm, fund_name, r["市場"])
-            if chart_path and os.path.exists(chart_path):
-                try:
-                    img = RLImage(chart_path, width=W, height=W*0.55)
-                    block.append(img)
-                except Exception:
-                    pass
         block.append(Spacer(1, 4*mm))
 
         elems.extend(block)
